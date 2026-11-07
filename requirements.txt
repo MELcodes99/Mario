@@ -1,4 +1,5 @@
 cryptography>=42
 httpx>=0.27
 websockets>=12
+mnemonic>=0.21
 pytest>=8

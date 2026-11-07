@@ -312,3 +312,15 @@ def test_withdraw_tx_and_allowlist(monkeypatch):
     ix = tx.instructions[0]
     assert tx.program_id(ix) == SYSTEM_PROGRAM and struct.unpack("<IQ", ix.data) == (2, 123_456_789)
     Ed25519PublicKey.from_public_bytes(kp.pubkey_bytes).verify(raw[tx.sig_offset:tx.sig_offset + 64], tx.message)
+
+
+def test_seed_phrase_matches_phantom():
+    from mario.wallet import entropy_to_mnemonic, mnemonic_is_valid, mnemonic_to_seed, slip10_ed25519
+    seed = bytes.fromhex("000102030405060708090a0b0c0d0e0f")              # SLIP-0010 vector 1
+    assert slip10_ed25519(seed, "m/0'").hex() == "68e0fe46dfb67e368c75379acec591dad19df3cde26e63b93a8e704f1dade7a3"
+    ph = "abandon " * 11 + "about"                                          # BIP39 vector
+    assert mnemonic_to_seed(ph, "TREZOR").hex().startswith("c55257c360c07c72029aebc1b53c05ed")
+    assert Keypair.from_mnemonic(ph).pubkey == "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk"   # Phantom's address
+    words = [f"w{i}" for i in range(2048)]
+    m = entropy_to_mnemonic(bytes(16), words)
+    assert m.split()[-1] == "w3" and mnemonic_is_valid(m, words) and not mnemonic_is_valid(m.replace("w3", "w4"), words)

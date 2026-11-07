@@ -2,7 +2,7 @@
                python -m mario scan
                python -m mario trade --max-trade 0.2 --max-loss 3 --duration 4 [--live]
                python -m mario pause | resume | stop | status
-               python -m mario wallet new | show | export-key | withdraw --to ADDR --amount 0.5|all
+               python -m mario wallet new | import | show | export-key | withdraw --to ADDR --amount 0.5|all
                python -m mario wallets add <address> [--label X] | list | remove <address>
                python -m mario report [--day YYYY-MM-DD]
                python -m mario reactivate [--live]
@@ -39,21 +39,34 @@ BANNER = r"""
 
 
 def cmd_wallet(s, a):
-    if a.action == "new":
+    if a.action in ("new", "import"):
         if Path(s.wallet_path).exists():
-            print(f"A wallet already exists at {s.wallet_path} ({wallet_pubkey(s.wallet_path)}).")
+            print(f"A wallet already exists at {s.wallet_path} ({wallet_pubkey(s.wallet_path)}).\n"
+                  f"Mario keeps one trading wallet. Withdraw its funds, then move that file away to make a new one.")
             return
+        if a.action == "new":
+            kp = Keypair.generate_with_mnemonic(12)
+        else:
+            from .wallet import _wordlist, mnemonic_is_valid
+            phrase = " ".join(getpass.getpass("Seed phrase (hidden while typing): ").lower().split())
+            if not mnemonic_is_valid(phrase, _wordlist()):
+                sys.exit("❌ that is not a valid 12/24-word seed phrase")
+            kp = Keypair.from_mnemonic(phrase)
         pw = None
         if a.encrypt:
             pw = getpass.getpass("Choose a passphrase: ")
             if pw != getpass.getpass("Repeat passphrase: "):
                 sys.exit("passphrases do not match")
-        kp = Keypair.generate()
         save_keypair(kp, s.wallet_path, pw)
-        print(f"\nNew DEDICATED trading wallet created.\n  address : {kp.pubkey}\n  file    : {s.wallet_path} (chmod 600)\n")
-        print("Next steps:\n  1. Back up the file now (or run `python -m mario wallet export-key` and store the key offline).\n"
-              "  2. Fund it ONLY with what Mario may trade. Keep the rest in a separate treasury wallet.\n"
-              "  3. Mario never needs, and must never be given, your main wallet or seed phrase.")
+        print(f"\n✅ Trading wallet {'created' if a.action == 'new' else 'imported'}\n"
+              f"  address : {kp.pubkey}\n  file    : {s.wallet_path} (chmod 600{', encrypted' if pw else ''})")
+        if a.action == "new":
+            words = kp.mnemonic.split()
+            print("\n  SEED PHRASE - write these 12 words on paper, in order. Anyone with them owns the wallet.\n")
+            for i in range(0, 12, 4):
+                print("   " + "   ".join(f"{n + 1:>2}. {w:<10}" for n, w in enumerate(words[i:i + 4], start=i)))
+            print(f"\n  Restores in Phantom/Solflare: Add wallet → Import recovery phrase (path {kp.path}).")
+        print("\nNext: fund it ONLY with what Mario may trade. Keep the rest in your own treasury wallet.")
     elif a.action == "show":
         pk = wallet_pubkey(s.wallet_path)
         if not pk:
@@ -109,6 +122,8 @@ def cmd_wallet(s, a):
             return
         kp = load_keypair(s.wallet_path)
         print(f"\naddress     : {kp.pubkey}\nprivate key : {kp.secret_b58()}\n(base58 - importable into Phantom/Solflare)")
+        if kp.mnemonic:
+            print(f"seed phrase : {kp.mnemonic}\n(path {kp.path})")
 
 
 def cmd_wallets(s, a):
@@ -303,9 +318,11 @@ def interactive(s):
                                 duration=d if d in DURATIONS else "custom", hours=float(d) if d not in DURATIONS else None)
         cmd_trade(s, ns)
     elif ch == "4":
-        w = input("  a) create  b) show balance  c) export key  d) withdraw SOL\n  Choose: ").strip().lower()
-        if w == "a":
-            cmd_wallet(s, argparse.Namespace(action="new", encrypt=input("Encrypt with a passphrase? [Y/n] ").lower() != "n"))
+        w = input("  a) create (new seed phrase)  b) show balance  c) export key & phrase  d) withdraw SOL  "
+                  "e) import from seed phrase\n  Choose: ").strip().lower()
+        if w in ("a", "e"):
+            enc = input("Also lock the wallet file with a passphrase? [y/N] ").strip().lower() == "y"
+            cmd_wallet(s, argparse.Namespace(action="new" if w == "a" else "import", encrypt=enc))
         elif w == "b":
             cmd_wallet(s, argparse.Namespace(action="show"))
         elif w == "c":
@@ -339,7 +356,7 @@ def main(argv=None):
     for c in ("pause", "resume", "stop", "status", "config", "paper-stats"):
         sub.add_parser(c)
     w = sub.add_parser("wallet")
-    w.add_argument("action", choices=["new", "show", "export-key", "withdraw"])
+    w.add_argument("action", choices=["new", "import", "show", "export-key", "withdraw"])
     w.add_argument("--encrypt", action="store_true")
     w.add_argument("--to", help="withdraw destination (must be in TREASURY_ADDRESS)")
     w.add_argument("--amount", default="all", help="SOL amount or 'all'")
