@@ -2,7 +2,7 @@
                python -m mario scan
                python -m mario trade --max-trade 0.2 --max-loss 3 --duration 4 [--live]
                python -m mario pause | resume | stop | status
-               python -m mario wallet new | show | export-key
+               python -m mario wallet new | show | export-key | withdraw --to ADDR --amount 0.5|all
                python -m mario wallets add <address> [--label X] | list | remove <address>
                python -m mario report [--day YYYY-MM-DD]
                python -m mario reactivate [--live]
@@ -72,6 +72,37 @@ def cmd_wallet(s, a):
             print(f"{pk}\nbalance: {b:.6f} SOL")
         except Exception as e:
             print(f"{pk}\nbalance: unavailable ({e})")
+    elif a.action == "withdraw":
+        from .clients.rpc import SolanaRPC
+        from .util import Http
+        from .withdraw import WithdrawError, allowed_addresses, check_destination, withdraw_sol
+        kp = load_keypair(s.wallet_path)
+        to = a.to or (allowed_addresses()[0] if len(allowed_addresses()) == 1 else None)
+        if not to:
+            sys.exit("give --to ADDRESS (one of TREASURY_ADDRESS in .env)")
+        try:
+            check_destination(to, kp.pubkey)
+        except WithdrawError as e:
+            sys.exit(f"❌ {e}")
+        amt = None if str(a.amount).lower() == "all" else float(a.amount)
+        j = Journal(s.db_path)
+        if j.q("SELECT 1 FROM positions WHERE status='open' AND mode='live'"):
+            print("⚠️  Mario has open LIVE positions. Withdrawing may leave it unable to pay fees to exit them.")
+        print(f"\nWithdraw {'ALL SOL (minus fee)' if amt is None else f'{amt} SOL'}\n  from {kp.pubkey}\n  to   {to}")
+        if input("Type WITHDRAW to confirm: ").strip() != "WITHDRAW":
+            sys.exit("cancelled")
+
+        async def go():
+            h = Http()
+            try:
+                return await withdraw_sol(SolanaRPC(h, s.rpc_url), kp, to, amt)
+            finally:
+                await h.aclose()
+        try:
+            sig, sent = asyncio.run(go())
+        except WithdrawError as e:
+            sys.exit(f"❌ {e}")
+        print(f"✅ sent {sent:.6f} SOL\n   https://solscan.io/tx/{sig}")
     elif a.action == "export-key":
         print("⚠️  Anyone with this key controls the wallet. Never paste it into a website or chat.")
         if input("Type SHOW to display it: ").strip() != "SHOW":
@@ -258,7 +289,7 @@ def interactive(s):
     print("\n  1) Scan mode   - find & call memecoins, hourly + end-of-day reports (no trading)\n"
           "  2) Trade mode  - paper trading (simulated with real quotes)\n"
           "  3) Trade mode  - LIVE trading (real funds)\n"
-          "  4) Create a trading wallet\n"
+          "  4) Wallet: create / show balance / export key / withdraw\n"
           "  5) Manage smart wallets to track\n"
           "  6) Status\n  q) Quit")
     ch = input("\nChoose: ").strip().lower()
@@ -272,7 +303,17 @@ def interactive(s):
                                 duration=d if d in DURATIONS else "custom", hours=float(d) if d not in DURATIONS else None)
         cmd_trade(s, ns)
     elif ch == "4":
-        cmd_wallet(s, argparse.Namespace(action="new", encrypt=input("Encrypt with a passphrase? [Y/n] ").lower() != "n"))
+        w = input("  a) create  b) show balance  c) export key  d) withdraw SOL\n  Choose: ").strip().lower()
+        if w == "a":
+            cmd_wallet(s, argparse.Namespace(action="new", encrypt=input("Encrypt with a passphrase? [Y/n] ").lower() != "n"))
+        elif w == "b":
+            cmd_wallet(s, argparse.Namespace(action="show"))
+        elif w == "c":
+            cmd_wallet(s, argparse.Namespace(action="export-key"))
+        elif w == "d":
+            to = input("Destination (blank = your TREASURY_ADDRESS): ").strip() or None
+            amt = input("Amount in SOL, or 'all' [all]: ").strip() or "all"
+            cmd_wallet(s, argparse.Namespace(action="withdraw", to=to, amount=amt))
     elif ch == "5":
         addr = input("Wallet address to track (blank = list): ").strip()
         if addr:
@@ -298,8 +339,10 @@ def main(argv=None):
     for c in ("pause", "resume", "stop", "status", "config", "paper-stats"):
         sub.add_parser(c)
     w = sub.add_parser("wallet")
-    w.add_argument("action", choices=["new", "show", "export-key"])
+    w.add_argument("action", choices=["new", "show", "export-key", "withdraw"])
     w.add_argument("--encrypt", action="store_true")
+    w.add_argument("--to", help="withdraw destination (must be in TREASURY_ADDRESS)")
+    w.add_argument("--amount", default="all", help="SOL amount or 'all'")
     ws = sub.add_parser("wallets", help="smart wallets Mario tracks")
     ws.add_argument("action", choices=["add", "list", "remove", "import"])
     ws.add_argument("address", nargs="*")

@@ -294,3 +294,21 @@ def test_rugcheck_market_accounts_can_be_objects():
                          "liquidityAAccount": {"pubkey": "VaultA", "owner": "PoolAuth", "mint": fx.MINT},
                          "liquidityBAccount": {"pubkey": "VaultB", "owner": "PoolAuth"}}])
     assert {"VaultA", "VaultB", "PoolAuth", fx.PAIR} <= r.markets[0].accounts
+
+
+def test_withdraw_tx_and_allowlist(monkeypatch):
+    from mario.withdraw import WithdrawError, build_sol_transfer, check_destination
+    kp, dest = Keypair.generate(), Keypair.generate().pubkey
+    monkeypatch.setenv("TREASURY_ADDRESS", "")
+    with pytest.raises(WithdrawError):
+        check_destination(dest, kp.pubkey)                  # nothing allow-listed
+    monkeypatch.setenv("TREASURY_ADDRESS", dest)
+    check_destination(dest, kp.pubkey)
+    with pytest.raises(WithdrawError):
+        check_destination(Keypair.generate().pubkey, kp.pubkey)   # unknown address
+    raw = build_sol_transfer(kp, dest, 123_456_789, fx.SOL)
+    tx = parse_transaction(raw)
+    assert tx.version == "legacy" and tx.static_keys[:2] == [kp.pubkey, dest]
+    ix = tx.instructions[0]
+    assert tx.program_id(ix) == SYSTEM_PROGRAM and struct.unpack("<IQ", ix.data) == (2, 123_456_789)
+    Ed25519PublicKey.from_public_bytes(kp.pubkey_bytes).verify(raw[tx.sig_offset:tx.sig_offset + 64], tx.message)
