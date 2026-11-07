@@ -1,0 +1,4 @@
+cryptography>=42
+httpx>=0.27
+websockets>=12
+pytest>=8

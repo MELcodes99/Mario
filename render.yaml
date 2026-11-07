@@ -1,0 +1,44 @@
+# Render Blueprint for Mario: one always-on background worker + a 1 GB persistent disk.
+# Background workers have no free tier (Starter instance). The disk keeps the journal,
+# reports, risk state and paper track record across restarts and deploys.
+services:
+  - type: worker
+    name: mario
+    runtime: python
+    plan: starter
+    region: frankfurt
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m mario service
+    autoDeployTrigger: "off"        # deploys restart Mario (and close trade positions) - deploy manually
+    maxShutdownDelaySeconds: 300    # time to close positions gracefully on stop/redeploy
+    disk:
+      name: mario-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: DATA_DIR
+        value: /var/data/mario
+      - key: REPORT_TZ
+        value: Africa/Lagos
+      - key: MARIO_MODE            # scan | paper | live
+        value: scan
+      - key: MARIO_MAX_TRADE       # SOL per trade (trade modes)
+        value: "0.1"
+      - key: MARIO_MAX_LOSS        # % session loss before Mario halts
+        value: "3"
+      - key: MARIO_HOURS           # cycle length: 1, 4, 8, 12, 24 or any number
+        value: "24"
+      - key: RPC_URL
+        sync: false
+      - key: JUPITER_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false

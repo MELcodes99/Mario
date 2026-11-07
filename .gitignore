@@ -1,0 +1,9 @@
+.venv/
+.env
+__pycache__/
+.pytest_cache/
+*.db
+*.db-*
+*.log
+trading-wallet.json
+.DS_Store
