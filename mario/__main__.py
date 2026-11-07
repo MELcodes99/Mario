@@ -222,6 +222,16 @@ def cmd_service(s):
         if os.environ.get("MARIO_CONFIRM_LIVE", "") != "TRADE LIVE":
             sys.exit("set MARIO_CONFIRM_LIVE='TRADE LIVE' to allow live trading")
         kp = load_keypair(s.wallet_path)
+    ephemeral = os.environ.get("MARIO_EPHEMERAL", "").lower() in ("1", "true", "yes")
+    if ephemeral and mode == "live":
+        sys.exit("live trading needs a persistent disk (risk limits and history must survive restarts). "
+                 "Use a paid instance with a disk and remove MARIO_EPHEMERAL.")
+    if ephemeral:
+        print("NOTE: no persistent disk - the journal, calls and paper record reset whenever the host restarts. "
+              "Telegram keeps a copy of every report.")
+    if os.environ.get("PORT"):
+        from .web import start_web
+        start_web(s, int(os.environ["PORT"]), os.environ.get("DASHBOARD_KEY", "").strip())
     print(f"Mario service: mode={mode} max_trade={max_trade} max_loss={max_loss}% hours={hours} data={s.data_dir}")
     if read_control(s.control_path).get("halted"):
         asyncio.run(wait_for_resume(s, read_control(s.control_path).get("halted_reason", "halted earlier")))

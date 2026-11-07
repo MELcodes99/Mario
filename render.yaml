@@ -1,29 +1,43 @@
-# Render Blueprint for Mario: one always-on background worker + a 1 GB persistent disk.
-# Background workers have no free tier (Starter instance). The disk keeps the journal,
-# reports, risk state and paper track record across restarts and deploys.
+# Render Blueprint for Mario as a WEB SERVICE.
+# It serves a small dashboard at  https://<your-service>.onrender.com/?key=<DASHBOARD_KEY>
+# and a health check at /health, while the bot runs in the same process.
+#
+# Default below = FREE plan. Free limits you must know:
+#  - spins down after ~15 min without incoming web traffic -> point a free pinger
+#    (cron-job.org / UptimeRobot) at /health every 10 minutes to keep Mario awake
+#  - no persistent disk -> calls, journal and paper record reset on every restart/deploy
+#  - live trading is refused on this setup (MARIO_EPHEMERAL=1)
+#
+# For paper-trade validation or live trading, upgrade: set plan: starter, uncomment `disk`,
+# set DATA_DIR to /var/data/mario and delete the MARIO_EPHEMERAL variable.
 services:
-  - type: worker
+  - type: web
     name: mario
     runtime: python
-    plan: starter
+    plan: free
     region: frankfurt
     buildCommand: pip install -r requirements.txt
     startCommand: python -m mario service
+    healthCheckPath: /health
     autoDeployTrigger: "off"        # deploys restart Mario (and close trade positions) - deploy manually
-    maxShutdownDelaySeconds: 300    # time to close positions gracefully on stop/redeploy
-    disk:
-      name: mario-data
-      mountPath: /var/data
-      sizeGB: 1
+    maxShutdownDelaySeconds: 300
+    # disk:
+    #   name: mario-data
+    #   mountPath: /var/data
+    #   sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.7"
       - key: PYTHONUNBUFFERED
         value: "1"
       - key: DATA_DIR
-        value: /var/data/mario
+        value: /tmp/mario-data
+      - key: MARIO_EPHEMERAL
+        value: "1"
       - key: REPORT_TZ
         value: Africa/Lagos
+      - key: DASHBOARD_KEY         # random secret; find it in Render > Environment
+        generateValue: true
       - key: MARIO_MODE            # scan | paper | live
         value: scan
       - key: MARIO_MAX_TRADE       # SOL per trade (trade modes)
